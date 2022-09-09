@@ -14,16 +14,18 @@ import {
 	INodeExecutionData,
 	INodeType,
 	IOAuth2Options,
+	IPairedItemData,
 	IPollFunctions as IPollFunctionsBase,
 	IPollResponse,
 	ITriggerFunctions as ITriggerFunctionsBase,
 	ITriggerResponse,
 	IWebhookFunctions as IWebhookFunctionsBase,
 	IWorkflowSettings as IWorkflowSettingsWorkflow,
+	NodeExecutionWithMetadata,
 } from 'n8n-workflow';
 
 import { OptionsWithUri, OptionsWithUrl } from 'request';
-import * as requestPromise from 'request-promise-native';
+import requestPromise from 'request-promise-native';
 
 interface Constructable<T> {
 	new (): T;
@@ -68,11 +70,16 @@ export interface IExecuteFunctions extends IExecuteFunctionsBase {
 			credentialsType: string,
 			requestOptions: IHttpRequestOptions,
 		): Promise<any>;
+		constructExecutionMetaData(
+			inputData: INodeExecutionData[],
+			options: { itemData: IPairedItemData | IPairedItemData[] },
+		): NodeExecutionWithMetadata[];
 	};
 }
 
 export interface IExecuteSingleFunctions extends IExecuteSingleFunctionsBase {
 	helpers: {
+		getBinaryDataBuffer(propertyName: string, inputIndex?: number): Promise<Buffer>;
 		httpRequest(requestOptions: IHttpRequestOptions): Promise<any>; // tslint:disable-line:no-any
 		prepareBinaryData(
 			binaryData: Buffer,
@@ -177,15 +184,6 @@ export interface ITriggerFunctions extends ITriggerFunctionsBase {
 			requestOptions: IHttpRequestOptions,
 		): Promise<any>;
 	};
-}
-
-export interface ITriggerTime {
-	mode: string;
-	hour: number;
-	minute: number;
-	dayOfMonth: number;
-	weekeday: number;
-	[key: string]: string | number;
 }
 
 export interface IUserSettings {

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable no-restricted-syntax */
 /* eslint-disable no-console */
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
@@ -26,21 +27,17 @@ import {
 } from 'n8n-workflow';
 
 // eslint-disable-next-line import/no-extraneous-dependencies
-import * as PCancelable from 'p-cancelable';
+import PCancelable from 'p-cancelable';
 import { join as pathJoin } from 'path';
 import { fork } from 'child_process';
 
-import * as Bull from 'bull';
-import * as config from '../config';
+import config from '../config';
 // eslint-disable-next-line import/no-cycle
 import {
 	ActiveExecutions,
 	CredentialsOverwrites,
-	CredentialTypes,
 	Db,
 	ExternalHooks,
-	IBullJobData,
-	IBullJobResponse,
 	ICredentialsOverwrite,
 	ICredentialsTypeData,
 	IExecutionFlattedDb,
@@ -66,14 +63,14 @@ export class WorkflowRunner {
 
 	push: Push.Push;
 
-	jobQueue: Bull.Queue;
+	jobQueue: Queue.JobQueue;
 
 	constructor() {
 		this.push = Push.getInstance();
 		this.activeExecutions = ActiveExecutions.getInstance();
 		this.credentialsOverwrites = CredentialsOverwrites().getAll();
 
-		const executionsMode = config.get('executions.mode') as string;
+		const executionsMode = config.getEnv('executions.mode');
 
 		if (executionsMode === 'queue') {
 			this.jobQueue = Queue.getInstance().getBullObjectInstance();
@@ -81,7 +78,7 @@ export class WorkflowRunner {
 	}
 
 	/**
-	 * The process did send a hook message so execute the appropiate hook
+	 * The process did send a hook message so execute the appropriate hook
 	 *
 	 * @param {WorkflowHooks} workflowHooks
 	 * @param {IProcessMessageDataHook} hookData
@@ -150,8 +147,8 @@ export class WorkflowRunner {
 		executionId?: string,
 		responsePromise?: IDeferredPromise<IExecuteResponsePromiseData>,
 	): Promise<string> {
-		const executionsProcess = config.get('executions.process') as string;
-		const executionsMode = config.get('executions.mode') as string;
+		const executionsProcess = config.getEnv('executions.process');
+		const executionsMode = config.getEnv('executions.mode');
 
 		if (executionsMode === 'queue' && data.executionMode !== 'manual') {
 			// Do not run "manual" executions in bull because sending events to the
@@ -229,13 +226,13 @@ export class WorkflowRunner {
 		// Changes were made by adding the `workflowTimeout` to the `additionalData`
 		// So that the timeout will also work for executions with nested workflows.
 		let executionTimeout: NodeJS.Timeout;
-		let workflowTimeout = config.get('executions.timeout') as number; // initialize with default
+		let workflowTimeout = config.getEnv('executions.timeout'); // initialize with default
 		if (data.workflowData.settings && data.workflowData.settings.executionTimeout) {
 			workflowTimeout = data.workflowData.settings.executionTimeout as number; // preference on workflow setting
 		}
 
 		if (workflowTimeout > 0) {
-			workflowTimeout = Math.min(workflowTimeout, config.get('executions.maxTimeout') as number);
+			workflowTimeout = Math.min(workflowTimeout, config.getEnv('executions.maxTimeout'));
 		}
 
 		const workflow = new Workflow({
@@ -246,6 +243,7 @@ export class WorkflowRunner {
 			active: data.workflowData.active,
 			nodeTypes,
 			staticData: data.workflowData.staticData,
+			settings: data.workflowData.settings,
 		});
 		const additionalData = await WorkflowExecuteAdditionalData.getBase(
 			data.userId,
@@ -310,7 +308,12 @@ export class WorkflowRunner {
 
 				// Can execute without webhook so go on
 				const workflowExecute = new WorkflowExecute(additionalData, data.executionMode);
-				workflowExecution = workflowExecute.run(workflow, undefined, data.destinationNode);
+				workflowExecution = workflowExecute.run(
+					workflow,
+					undefined,
+					data.destinationNode,
+					data.pinData,
+				);
 			} else {
 				Logger.debug(`Execution ID ${executionId} is a partial execution.`, { executionId });
 				// Execute only the nodes between start and destination nodes
@@ -320,14 +323,14 @@ export class WorkflowRunner {
 					data.runData,
 					data.startNodes,
 					data.destinationNode,
+					data.pinData,
 				);
 			}
 
 			this.activeExecutions.attachWorkflowExecution(executionId, workflowExecution);
 
 			if (workflowTimeout > 0) {
-				const timeout =
-					Math.min(workflowTimeout, config.get('executions.maxTimeout') as number) * 1000; // as seconds
+				const timeout = Math.min(workflowTimeout, config.getEnv('executions.maxTimeout')) * 1000; // as seconds
 				executionTimeout = setTimeout(() => {
 					this.activeExecutions.stopExecution(executionId, 'timeout');
 				}, timeout);
@@ -380,7 +383,7 @@ export class WorkflowRunner {
 			this.activeExecutions.attachResponsePromise(executionId, responsePromise);
 		}
 
-		const jobData: IBullJobData = {
+		const jobData: Queue.JobData = {
 			executionId,
 			loadStaticData: !!loadStaticData,
 		};
@@ -397,7 +400,7 @@ export class WorkflowRunner {
 			removeOnComplete: true,
 			removeOnFail: true,
 		};
-		let job: Bull.Job;
+		let job: Queue.Job;
 		let hooks: WorkflowHooks;
 		try {
 			job = await this.jobQueue.add(jobData, jobOptions);
@@ -448,11 +451,11 @@ export class WorkflowRunner {
 					reject(error);
 				});
 
-				const jobData: Promise<IBullJobResponse> = job.finished();
+				const jobData: Promise<Queue.JobResponse> = job.finished();
 
-				const queueRecoveryInterval = config.get('queue.bull.queueRecoveryInterval') as number;
+				const queueRecoveryInterval = config.getEnv('queue.bull.queueRecoveryInterval');
 
-				const racingPromises: Array<Promise<IBullJobResponse | object>> = [jobData];
+				const racingPromises: Array<Promise<Queue.JobResponse | object>> = [jobData];
 
 				let clearWatchdogInterval;
 				if (queueRecoveryInterval > 0) {
@@ -462,7 +465,7 @@ export class WorkflowRunner {
 					 * when Redis crashes and recovers shortly       *
 					 * but during this time, some execution(s)       *
 					 * finished. The end result is that the main     *
-					 * process will wait indefinitively and never    *
+					 * process will wait indefinitely and never      *
 					 * get a response. This adds an active polling to*
 					 * the queue that allows us to identify that the *
 					 * execution finished and get information from   *
@@ -514,7 +517,7 @@ export class WorkflowRunner {
 					reject(error);
 				}
 
-				const executionDb = (await Db.collections.Execution!.findOne(
+				const executionDb = (await Db.collections.Execution.findOne(
 					executionId,
 				)) as IExecutionFlattedDb;
 				const fullExecutionData = ResponseHelper.unflattenExecutionData(executionDb);
@@ -533,8 +536,8 @@ export class WorkflowRunner {
 				try {
 					// Check if this execution data has to be removed from database
 					// based on workflow settings.
-					let saveDataErrorExecution = config.get('executions.saveDataOnError') as string;
-					let saveDataSuccessExecution = config.get('executions.saveDataOnSuccess') as string;
+					let saveDataErrorExecution = config.getEnv('executions.saveDataOnError') as string;
+					let saveDataSuccessExecution = config.getEnv('executions.saveDataOnSuccess') as string;
 					if (data.workflowData.settings !== undefined) {
 						saveDataErrorExecution =
 							(data.workflowData.settings.saveDataErrorExecution as string) ||
@@ -549,7 +552,7 @@ export class WorkflowRunner {
 						(workflowDidSucceed && saveDataSuccessExecution === 'none') ||
 						(!workflowDidSucceed && saveDataErrorExecution === 'none')
 					) {
-						await Db.collections.Execution!.delete(executionId);
+						await Db.collections.Execution.delete(executionId);
 						await BinaryDataManager.getInstance().markDataForDeletionByExecutionId(executionId);
 					}
 					// eslint-disable-next-line id-denylist
@@ -561,6 +564,12 @@ export class WorkflowRunner {
 				resolve(runData);
 			},
 		);
+
+		workflowExecution.catch(() => {
+			// We `reject` this promise if the execution fails
+			// but the error is handled already by processError
+			// So we're just preventing crashes here.
+		});
 
 		this.activeExecutions.attachWorkflowExecution(executionId, workflowExecution);
 		return executionId;
@@ -643,7 +652,7 @@ export class WorkflowRunner {
 
 		// Start timeout for the execution
 		let executionTimeout: NodeJS.Timeout;
-		let workflowTimeout = config.get('executions.timeout') as number; // initialize with default
+		let workflowTimeout = config.getEnv('executions.timeout'); // initialize with default
 		if (data.workflowData.settings && data.workflowData.settings.executionTimeout) {
 			workflowTimeout = data.workflowData.settings.executionTimeout as number; // preference on workflow setting
 		}
@@ -654,8 +663,7 @@ export class WorkflowRunner {
 		};
 
 		if (workflowTimeout > 0) {
-			workflowTimeout =
-				Math.min(workflowTimeout, config.get('executions.maxTimeout') as number) * 1000; // as seconds
+			workflowTimeout = Math.min(workflowTimeout, config.getEnv('executions.maxTimeout')) * 1000; // as seconds
 			// Start timeout already now but give process at least 5 seconds to start.
 			// Without it could would it be possible that the workflow executions times out before it even got started if
 			// the timeout time is very short as the process start time can be quite long.

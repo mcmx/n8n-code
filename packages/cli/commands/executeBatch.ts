@@ -6,10 +6,10 @@
 /* eslint-disable no-param-reassign */
 /* eslint-disable @typescript-eslint/unbound-method */
 /* eslint-disable no-console */
-import * as fs from 'fs';
+import fs from 'fs';
 import { Command, flags } from '@oclif/command';
 
-import { BinaryDataManager, IBinaryDataConfig, UserSettings } from 'n8n-core';
+import { BinaryDataManager, UserSettings } from 'n8n-core';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import { INode, ITaskData, LoggerProxy } from 'n8n-workflow';
@@ -36,7 +36,7 @@ import {
 	NodeTypes,
 	WorkflowRunner,
 } from '../src';
-import config = require('../config');
+import config from '../config';
 import { User } from '../src/databases/entities/User';
 import { getInstanceOwner } from '../src/UserManagement/UserManagementHelper';
 
@@ -98,7 +98,7 @@ export class ExecuteBatch extends Command {
 		}),
 		shallow: flags.boolean({
 			description:
-				'Compares only if attributes output from node are the same, with no regards to neste JSON objects.',
+				'Compares only if attributes output from node are the same, with no regards to nested JSON objects.',
 		}),
 		skipList: flags.string({
 			description: 'File containing a comma separated list of workflow IDs to skip.',
@@ -152,7 +152,7 @@ export class ExecuteBatch extends Command {
 			executingWorkflows = activeExecutionsInstance.getActiveExecutions();
 		}
 		// We may receive true but when called from `process.on`
-		// we get the signal (SIGNIT, etc.)
+		// we get the signal (SIGINT, etc.)
 		if (skipExit !== true) {
 			process.exit(0);
 		}
@@ -196,7 +196,7 @@ export class ExecuteBatch extends Command {
 
 		const logger = getLogger();
 		LoggerProxy.init(logger);
-		const binaryDataConfig = config.get('binaryDataManager') as IBinaryDataConfig;
+		const binaryDataConfig = config.getEnv('binaryDataManager');
 		await BinaryDataManager.init(binaryDataConfig, true);
 
 		// eslint-disable-next-line @typescript-eslint/no-shadow
@@ -297,7 +297,7 @@ export class ExecuteBatch extends Command {
 
 		let allWorkflows;
 
-		const query = Db.collections.Workflow!.createQueryBuilder('workflows');
+		const query = Db.collections.Workflow.createQueryBuilder('workflows');
 
 		if (ids.length > 0) {
 			query.andWhere(`workflows.id in (:...ids)`, { ids });
@@ -864,7 +864,7 @@ export class ExecuteBatch extends Command {
 							}
 						}
 						// Save snapshots only after comparing - this is to make sure we're updating
-						// After comparing to existing verion.
+						// After comparing to existing version.
 						if (ExecuteBatch.snapshot !== undefined) {
 							const fileName = `${
 								ExecuteBatch.snapshot.endsWith(sep)

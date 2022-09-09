@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 // @ts-ignore
-import * as sseChannel from 'sse-channel';
-import * as express from 'express';
+import sseChannel from 'sse-channel';
+import express from 'express';
 
 import { LoggerProxy as Logger } from 'n8n-workflow';
 // eslint-disable-next-line import/no-cycle
@@ -68,7 +68,7 @@ export class Push {
 	// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types, @typescript-eslint/no-explicit-any
 	send(type: IPushDataType, data: any, sessionId?: string) {
 		if (sessionId !== undefined && this.connections[sessionId] === undefined) {
-			Logger.error(`The session "${sessionId}" is not registred.`, { sessionId });
+			Logger.error(`The session "${sessionId}" is not registered.`, { sessionId });
 			return;
 		}
 
